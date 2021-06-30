@@ -249,6 +249,9 @@ apiVersion: v1
 data:
   # The number of days kept for pipelinerun inside pipelines-as-code namespace
   max-keep-days: "5"
+
+  # The application name, you can customize this label
+  application-name: "Pipelines as Code"
 kind: ConfigMap
 metadata:
   name: pipelines-as-code
@@ -652,6 +655,12 @@ spec:
                   - name: apply-and-launch
                     imagePullPolicy: Always
                     image: "quay.io/openshift-pipeline/pipelines-as-code:main"
+                    env:
+                    - name: PAC_APPLICATION_NAME
+                      valueFrom:
+                        configMapKeyRef:
+                          name: pipelines-as-code
+                          key: application-name
                     script: |
                       #!/usr/bin/env bash
                       set -eux
@@ -883,6 +892,12 @@ spec:
                     type: string
                 steps:
                   - name: apply-and-launch
+                    env:
+                    - name: PAC_APPLICATION_NAME
+                      valueFrom:
+                        configMapKeyRef:
+                          name: pipelines-as-code
+                          key: application-name
                     imagePullPolicy: Always
                     image: "quay.io/openshift-pipeline/pipelines-as-code:main"
                     script: |
@@ -1114,6 +1129,12 @@ spec:
                   - name: apply-and-launch
                     imagePullPolicy: Always
                     image: "quay.io/openshift-pipeline/pipelines-as-code:main"
+                    env:
+                    - name: PAC_APPLICATION_NAME
+                      valueFrom:
+                        configMapKeyRef:
+                          name: pipelines-as-code
+                          key: application-name
                     script: |
                       cat << EOF > /tmp/payload.json
                       {
@@ -1311,7 +1332,15 @@ spec:
                   - name: apply-and-launch
                     imagePullPolicy: Always
                     image: "quay.io/openshift-pipeline/pipelines-as-code:main"
+                    env:
+                    - name: PAC_APPLICATION_NAME
+                      valueFrom:
+                        configMapKeyRef:
+                          name: pipelines-as-code
+                          key: application-name
                     script: |
+                      env
+                      env|grep PAC_APPLICATION_NAME
                       cat << EOF > /tmp/payload.json
                       {
                         "action": "$(params.action)",
