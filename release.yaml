@@ -104,6 +104,10 @@ rules:
   - apiGroups: [""]
     resources: ["namespaces", "pods", "pods/log"]
     verbs: ["get", "list", "watch"]
+  # Allow creating secrets in namespace
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "create", "update"]
   # Permissions to list repositories on cluster
   - apiGroups: ["pipelinesascode.tekton.dev"]
     resources: ["repositories"]
@@ -252,6 +256,10 @@ data:
 
   # The application name, you can customize this label
   application-name: "Pipelines as Code CI"
+
+  # Wether to automatically create a secret with the token to be use by git-clone
+  secret-auto-create: "true"
+
 kind: ConfigMap
 metadata:
   name: pipelines-as-code
@@ -664,6 +672,11 @@ spec:
                         configMapKeyRef:
                           name: pipelines-as-code
                           key: application-name
+                    - name: PAC_SECRET_AUTO_CREATE
+                      valueFrom:
+                        configMapKeyRef:
+                          name: pipelines-as-code
+                          key: secret-auto-create
                     script: |
                       #!/usr/bin/env bash
                       set -eux
@@ -901,6 +914,11 @@ spec:
                         configMapKeyRef:
                           name: pipelines-as-code
                           key: application-name
+                    - name: PAC_SECRET_AUTO_CREATE
+                      valueFrom:
+                        configMapKeyRef:
+                          name: pipelines-as-code
+                          key: secret-auto-create
                     imagePullPolicy: Always
                     image: "quay.io/openshift-pipeline/pipelines-as-code:main"
                     script: |
@@ -1138,6 +1156,11 @@ spec:
                         configMapKeyRef:
                           name: pipelines-as-code
                           key: application-name
+                    - name: PAC_SECRET_AUTO_CREATE
+                      valueFrom:
+                        configMapKeyRef:
+                          name: pipelines-as-code
+                          key: secret-auto-create
                     script: |
                       cat << EOF > /tmp/payload.json
                       {
@@ -1341,6 +1364,11 @@ spec:
                         configMapKeyRef:
                           name: pipelines-as-code
                           key: application-name
+                    - name: PAC_SECRET_AUTO_CREATE
+                      valueFrom:
+                        configMapKeyRef:
+                          name: pipelines-as-code
+                          key: secret-auto-create
                     script: |
                       cat << EOF|tee /tmp/payload.json
                       {
