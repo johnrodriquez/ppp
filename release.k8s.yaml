@@ -104,10 +104,11 @@ rules:
   - apiGroups: [""]
     resources: ["namespaces", "pods", "pods/log"]
     verbs: ["get", "list", "watch"]
-  # Allow creating and deleting secrets in namespace
+  # Allow getting, creating and deleting secrets in namespace
+  # This is to be able to attach secret to repository on webhook.
   - apiGroups: [""]
     resources: ["secrets"]
-    verbs: ["create", "delete"]
+    verbs: ["get", "create", "delete"]
   # Permissions to list repositories on cluster
   - apiGroups: ["pipelinesascode.tekton.dev"]
     resources: ["repositories"]
@@ -225,6 +226,19 @@ spec:
                 namespace:
                   description: Namespace
                   type: string
+                webvcs_api_url:
+                  description: The API URL for the WEBVCS
+                  type: string
+                webvcs_secret:
+                  type: object
+                  properties:
+                    key:
+                      type: string
+                      description: "Key inside the secret"
+                      default: "token"
+                    name:
+                      type: string
+                      description: "The secret name"
               type: object
           type: object
   scope: Namespaced
@@ -431,9 +445,7 @@ spec:
           params:
             - name: "filter"
               value: >-
-                'installation' in body &&
-                'pusher' in body &&
-                'installation' in body
+                'pusher' in body
       bindings:
         - ref: pipelines-as-code-bindings-push
       template:
@@ -482,8 +494,7 @@ spec:
           params:
             - name: "filter"
               value: >-
-                body.action in ['created', 'synchronize', 'opened'] &&
-                'installation' in body
+                body.action in ['created', 'synchronize', 'opened']
       bindings:
         - ref: pipelines-as-code-bindings-pullreq
       template:
@@ -562,6 +573,7 @@ spec:
     - name: pull_request_number
     - name: sender
     - name: installation_id
+      default: ""
     - name: trigger_target
     - name: ghe_host
       default: "api.github.com"
@@ -789,13 +801,16 @@ spec:
       value: $(body.pull_request.user.login)
     - name: "base_ref"
       value: $(body.pull_request.base.ref)
+    - name: "pull_request_number"
+      value: $(body.pull_request.number)
+    - name: "pull_request_html_url"
+      value: $(body.pull_request.html_url)
     - name: "sha"
       value: $(body.pull_request.head.sha)
     - name: "head_ref"
       value: $(body.pull_request.head.ref)
     - name: "installation_id"
       value: $(body.installation.id)
-
 ---
 apiVersion: triggers.tekton.dev/v1alpha1
 kind: TriggerTemplate
@@ -814,9 +829,12 @@ spec:
     - name: url
     - name: sender
     - name: base_ref
+    - name: pull_request_number
+    - name: pull_request_html_url
     - name: sha
     - name: head_ref
     - name: installation_id
+      default: ""
     - name: trigger_target
     - name: ghe_host
       default: "api.github.com"
@@ -849,6 +867,10 @@ spec:
             value: $(tt.params.sender)
           - name: base_ref
             value: $(tt.params.base_ref)
+          - name: pull_request_number
+            value: $(tt.params.pull_request_number)
+          - name: pull_request_html_url
+            value: $(tt.params.pull_request_html_url)
           - name: sha
             value: $(tt.params.sha)
           - name: head_ref
@@ -866,6 +888,8 @@ spec:
             - name: url
             - name: sender
             - name: base_ref
+            - name: pull_request_number
+            - name: pull_request_html_url
             - name: sha
             - name: head_ref
             - name: installation_id
@@ -904,6 +928,10 @@ spec:
                   - name: sender
                     type: string
                   - name: base_ref
+                    type: string
+                  - name: pull_request_number
+                    type: string
+                  - name: pull_request_html_url
                     type: string
                   - name: sha
                     type: string
@@ -944,6 +972,8 @@ spec:
                               "html_url": "$(params.url)"
                           },
                           "pull_request": {
+                              "number": $(params.pull_request_number),
+                              "html_url": "$(params.pull_request_html_url)",
                               "user": {
                                   "login": "$(params.sender)"
                               },
@@ -981,13 +1011,16 @@ spec:
                   value: $(params.sender)
                 - name: base_ref
                   value: $(params.base_ref)
+                - name: pull_request_number
+                  value: $(params.pull_request_number)
+                - name: pull_request_html_url
+                  value: $(params.pull_request_html_url)
                 - name: sha
                   value: $(params.sha)
                 - name: head_ref
                   value: $(params.head_ref)
                 - name: token
                   value: "$(tasks.get-token.results.token)"
-
         workspaces:
           - name: secrets
             secret:
@@ -1065,6 +1098,7 @@ spec:
     - name: sha
     - name: head_ref
     - name: installation_id
+      default: ""
     - name: trigger_target
   resourcetemplates:
     - apiVersion: tekton.dev/v1beta1
@@ -1293,6 +1327,7 @@ spec:
     - name: repository
     - name: pull_request_url
     - name: installation_id
+      default: ""
     - name: trigger_target
     - name: ghe_host
       default: "api.github.com"
@@ -1580,9 +1615,15 @@ spec:
         import json
         import os
         import time
+        import sys
 
         import requests
         from jwcrypto import jwk, jwt
+
+        if not os.environ.get("GITHUBAPP_INSTALLATION_ID"):
+          open(os.environ.get('GITHUBAPP_RESULT_PATH'), 'w').write("")
+          print("Skipping, since event not coming from a githup app installation")
+          sys.exit(0)
 
         EXPIRE_MINUTES_AS_SECONDS = int(os.environ.get('GITHUBAPP_TOKEN_EXPIRATION_MINUTES', 10)) * 60
         GITHUB_API_URL = "https://" + os.environ.get('GITHUB_API_URL')
