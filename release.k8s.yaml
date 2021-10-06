@@ -274,6 +274,16 @@ data:
   # Wether to automatically create a secret with the token to be use by git-clone
   secret-auto-create: "true"
 
+  # Since public bitbucket doesn't have the concept of Secret, we need to be
+  # able to secure the request by querying https://ip-ranges.atlassian.com/,
+  # this only happen for public bitbucket (ie: when webvcs-api-url is not set in
+  # repository spec). If you want to override this, you need to bear in mind
+  # this could be a security issue, a malicious user can send a PR to your repo
+  # with a modification to your PipelineRun that would grab secrets, tunnel or
+  # others and then send a malicious webhook payload to the eventlistenner which
+  # look like a authorized owner has send the PR to run it..
+  bitbucket-cloud-check-source-ip: "true"
+
 kind: ConfigMap
 metadata:
   name: pipelines-as-code
@@ -476,7 +486,7 @@ spec:
       template:
         ref: pipelines-as-code-template-recheck
 
-    # When sending a new Pull Request
+    # GitHub When sending a new Pull Request
     - name: github-pull-request
       interceptors:
         - ref:
@@ -499,6 +509,83 @@ spec:
         - ref: pipelines-as-code-bindings-pullreq
       template:
         ref: pipelines-as-code-template-pullreq
+
+    # Bitbucket Cloud event when sending a new Pull Request
+    - name: bitbucket-cloud-pull-request
+      bindings:
+        - ref: pipelines-as-code-bitbucket-cloud-pullreq
+        - ref: pipelines-as-code-bitbucket-cloud-pullreq-common
+      interceptors:
+        - ref:
+            name: "bitbucket"
+          params:
+            # TODO: secrets! this should come from Repository CRD so we need to do this from the pac binary :\
+            - name: eventTypes
+              value:
+                - pullrequest:created
+                - pullrequest:updated
+      template:
+        ref: pipelines-as-code-bitbucket-cloud-pullreq
+
+    # When you have a /ok-to-test in a comment to allow CI on a non owner sender
+    - name: bitbucket-cloud-issue-comment-ok-to-test
+      interceptors:
+        - ref:
+            name: "bitbucket"
+          params:
+            - name: eventTypes
+              value:
+                - pullrequest:comment_created
+        - name: "Handle /ok-to-test comment in issue"
+          ref:
+            name: "cel"
+          params:
+            - name: "filter"
+              value: >-
+                  body.comment.content.raw.matches('(^|\\r\\n)/ok-to-test([ ]*$|$|\\r\\n)')
+      bindings:
+        - ref: pipelines-as-code-bitbucket-cloud-ok-to-test-comment
+        - ref: pipelines-as-code-bitbucket-cloud-pullreq-common
+      template:
+        # Using the templateRef from retest since they are mostly the same
+        ref: pipelines-as-code-bitbucket-cloud-pullreq
+
+    - name: bitbucket-cloud-issue-retest-test
+      interceptors:
+        - ref:
+            name: "bitbucket"
+          params:
+            - name: eventTypes
+              value:
+                - pullrequest:comment_created
+        - name: "Handle /retest comment in issue"
+          ref:
+            name: "cel"
+          params:
+            - name: "filter"
+              value: >-
+                  body.comment.content.raw.matches('(^|\\r\\n)/retest([ ]*$|$|\\r\\n)')
+      bindings:
+        - ref: pipelines-as-code-bitbucket-cloud-retest-comment
+        - ref: pipelines-as-code-bitbucket-cloud-pullreq-common
+      template:
+        # Using the templateRef from retest since they are mostly the same
+        ref: pipelines-as-code-bitbucket-cloud-pullreq
+
+    # Bitbucket Cloud event when sending a new Pull Request
+    - name: bitbucket-cloud-push
+      bindings:
+        - ref: pipelines-as-code-bitbucket-cloud-push
+      interceptors:
+        - ref:
+            name: "bitbucket-cloud"
+          params:
+            # TODO: secrets! this should come from Repository CRD so we need to do this from the pac binary :\
+            - name: eventTypes
+              value:
+                - repo:push
+      template:
+        ref: pipelines-as-code-bitbucket-cloud-push
 ---
 # Copyright 2021 Red Hat
 #
@@ -758,6 +845,525 @@ spec:
           - name: secrets
             secret:
               secretName: github-app-secret
+---
+# Copyright 2021 Red Hat
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: TriggerBinding
+metadata:
+  name: pipelines-as-code-bitbucket-cloud-pullreq
+  namespace: pipelines-as-code
+  labels:
+    app.kubernetes.io/instance: default
+    app.kubernetes.io/part-of: pipelines-as-code
+spec:
+  params:
+    - name: event_type
+      value: pull_request
+
+    - name: trigger_target
+      value: pull_request
+
+---
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: TriggerBinding
+metadata:
+  name: pipelines-as-code-bitbucket-cloud-pullreq-common
+  namespace: pipelines-as-code
+  labels:
+    app.kubernetes.io/instance: default
+    app.kubernetes.io/part-of: pipelines-as-code
+spec:
+  params:
+    - name: "source_ip"
+      value: $(header.X-Forwarded-For)
+    - name: "workspace_slug"
+      value: $(body.repository.workspace.slug)
+    - name: "repository_name"
+      value: $(body.repository.name)
+    - name: "repository_html_link"
+      value: $(body.repository.links.html.href)
+    - name: "pullrequest_account_id"
+      value: $(body.pullrequest.author.account_id)
+    - name: "pullrequest_author_nickname"
+      value: $(body.pullrequest.author.nickname)
+    - name: "destination_branch_name"
+      value: $(body.pullrequest.destination.branch.name)
+    - name: "source_branch"
+      value: $(body.pullrequest.source.branch.name)
+    - name: "source_commit_hash"
+      value: $(body.pullrequest.source.commit.hash)
+    - name: "pullrequest_id"
+      value: $(body.pullrequest.id)
+---
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: TriggerTemplate
+metadata:
+  name: pipelines-as-code-bitbucket-cloud-pullreq
+  namespace: pipelines-as-code
+  labels:
+    app.kubernetes.io/instance: default
+    app.kubernetes.io/part-of: pipelines-as-code
+spec:
+  params:
+    - name: trigger_target
+    - name: event_type
+    - name: source_ip
+    - name: workspace_slug
+    - name: repository_name
+    - name: repository_html_link
+    - name: pullrequest_account_id
+    - name: pullrequest_author_nickname
+    - name: destination_branch_name
+    - name: source_branch
+    - name: source_commit_hash
+    - name: pullrequest_id
+  resourcetemplates:
+    - apiVersion: tekton.dev/v1beta1
+      kind: PipelineRun
+      metadata:
+        generateName: pipelines-as-code-run-
+        labels:
+          app.kubernetes.io/managed-by: pipelines-as-code
+          # TODO: maybe do a truncate here to at least know the pull_request event
+          # pipelinesascode.tekton.dev/event: $(tt.params.event_type)
+      spec:
+        serviceAccountName: pipelines-as-code-sa-el
+        params:
+          - name: source_ip
+            value: $(tt.params.source_ip)
+          - name: trigger_target
+            value: $(tt.params.trigger_target)
+          - name: event_type
+            value: $(tt.params.event_type)
+          - name: workspace_slug
+            value: $(tt.params.workspace_slug)
+          - name: repository_name
+            value: $(tt.params.repository_name)
+          - name: repository_html_link
+            value: $(tt.params.repository_html_link)
+          - name: pullrequest_account_id
+            value: $(tt.params.pullrequest_account_id)
+          - name: pullrequest_author_nickname
+            value: $(tt.params.pullrequest_author_nickname)
+          - name: destination_branch_name
+            value: $(tt.params.destination_branch_name)
+          - name: source_branch
+            value: $(tt.params.source_branch)
+          - name: source_commit_hash
+            value: $(tt.params.source_commit_hash)
+          - name: pullrequest_id
+            value: $(tt.params.pullrequest_id)
+        pipelineSpec:
+          params:
+            - name: trigger_target
+            - name: source_ip
+            - name: event_type
+            - name: workspace_slug
+            - name: repository_name
+            - name: repository_html_link
+            - name: pullrequest_account_id
+            - name: pullrequest_author_nickname
+            - name: destination_branch_name
+            - name: source_branch
+            - name: source_commit_hash
+            - name: pullrequest_id
+          tasks:
+            - name: pipelines-as-code
+              taskSpec:
+                params:
+                  - name: trigger_target
+                    type: string
+                  - name: source_ip
+                    type: string
+                  - name: event_type
+                    type: string
+                  - name: workspace_slug
+                    type: string
+                  - name: repository_name
+                    type: string
+                  - name: repository_html_link
+                    type: string
+                  - name: pullrequest_account_id
+                    type: string
+                  - name: pullrequest_author_nickname
+                    type: string
+                  - name: destination_branch_name
+                    type: string
+                  - name: source_branch
+                    type: string
+                  - name: source_commit_hash
+                    type: string
+                  - name: pullrequest_id
+                    type: string
+                steps:
+                  - name: apply-and-launch
+                    env:
+                      - name: PAC_APPLICATION_NAME
+                        valueFrom:
+                          configMapKeyRef:
+                            name: pipelines-as-code
+                            key: application-name
+                      - name: PAC_SECRET_AUTO_CREATE
+                        valueFrom:
+                          configMapKeyRef:
+                            name: pipelines-as-code
+                            key: secret-auto-create
+                      - name: PAC_BITBUCKET_CLOUD_CHECK_SOURCE_IP
+                        valueFrom:
+                          configMapKeyRef:
+                            name: pipelines-as-code
+                            key: bitbucket-cloud-check-source-ip
+                      - name: PAC_WEBVCS_TYPE
+                        value: "bitbucket-cloud"
+                    imagePullPolicy: Always
+                    image: "quay.io/openshift-pipeline/pipelines-as-code:main"
+                    script: |
+                      cat << EOF |tee /tmp/payload.json
+                      {
+                          "repository": {
+                              "workspace": {
+                                  "slug": "$(params.workspace_slug)"
+                              },
+                              "name": "$(params.repository_name)",
+                              "links": {
+                                  "html": {
+                                      "href": "$(params.repository_html_link)"
+                                  }
+                              }
+                          },
+                          "pullrequest": {
+                              "id":  $(params.pullrequest_id),
+                              "author": {
+                                  "account_id": "$(params.pullrequest_account_id)",
+                                  "nickname": "$(params.pullrequest_author_nickname)"
+                              },
+                              "destination": {
+                                  "branch": {
+                                      "name": "$(params.destination_branch_name)"
+                                  }
+                              },
+                              "source": {
+                                  "branch": {
+                                      "name": "$(params.source_branch)"
+                                  },
+                                  "commit": {
+                                      "hash": "$(params.source_commit_hash)"
+                                  }
+                              }
+                          }
+                      }
+                      EOF
+                      export PAC_SOURCE_IP="$(params.source_ip)"
+                      env|grep '^PAC'|sed 's/TOKEN=.*/TOKEN=HIDDENTOKEN/'
+                      pipelines-as-code --trigger-target=$(params.trigger_target) \
+                        --payload-file=/tmp/payload.json \
+                        --webhook-type="$(params.event_type)"
+              params:
+                - name: source_ip
+                  value: $(params.source_ip)
+                - name: trigger_target
+                  value: $(params.trigger_target)
+                - name: event_type
+                  value: $(params.event_type)
+                - name: workspace_slug
+                  value: $(params.workspace_slug)
+                - name: repository_name
+                  value: $(params.repository_name)
+                - name: repository_html_link
+                  value: $(params.repository_html_link)
+                - name: pullrequest_account_id
+                  value: $(params.pullrequest_account_id)
+                - name: pullrequest_author_nickname
+                  value: $(params.pullrequest_author_nickname)
+                - name: destination_branch_name
+                  value: $(params.destination_branch_name)
+                - name: source_branch
+                  value: $(params.source_branch)
+                - name: source_commit_hash
+                  value: $(params.source_commit_hash)
+                - name: pullrequest_id
+                  value: $(params.pullrequest_id)
+---
+# Copyright 2021 Red Hat
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: TriggerBinding
+metadata:
+  name: pipelines-as-code-bitbucket-cloud-push
+  namespace: pipelines-as-code
+  labels:
+    app.kubernetes.io/instance: default
+    app.kubernetes.io/part-of: pipelines-as-code
+spec:
+  params:
+    - name: "source_ip"
+      value: $(header.X-Forwarded-For)
+    - name: event_type
+      value: "push"
+    - name: trigger_target
+      value: "push"
+    - name: "workspace_slug"
+      value: $(body.repository.workspace.slug)
+    - name: "repository_name"
+      value: $(body.repository.name)
+    - name: "repository_html_link"
+      value: $(body.repository.links.html.href)
+    - name: "actor_acount_id"
+      value: $(body.actor.account_id)
+    - name: "actor_nickname"
+      value: $(body.actor.nickname)
+    - name: "branch_new_name"
+      value: $(body.push.changes[0].new.name)
+    - name: "branch_old_name"
+      value: $(body.push.changes[0].old.name)
+    - name: "push_new_hash"
+      value: $(body.push.changes[0].new.target.hash)
+---
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: TriggerTemplate
+metadata:
+  name: pipelines-as-code-bitbucket-cloud-push
+  namespace: pipelines-as-code
+  labels:
+    app.kubernetes.io/instance: default
+    app.kubernetes.io/part-of: pipelines-as-code
+spec:
+  params:
+    - name: source_ip
+    - name: event_type
+    - name: trigger_target
+    - name: workspace_slug
+    - name: repository_name
+    - name: repository_html_link
+    - name: actor_acount_id
+    - name: actor_nickname
+    - name: branch_new_name
+    - name: branch_old_name
+    - name: push_new_hash
+  resourcetemplates:
+    - apiVersion: tekton.dev/v1beta1
+      kind: PipelineRun
+      metadata:
+        generateName: pipelines-as-code-run-
+        labels:
+          app.kubernetes.io/managed-by: pipelines-as-code
+      spec:
+        serviceAccountName: pipelines-as-code-sa-el
+        params:
+          - name: source_ip
+            value: $(tt.params.source_ip)
+          - name: event_type
+            value: $(tt.params.event_type)
+          - name: trigger_target
+            value: $(tt.params.trigger_target)
+          - name: workspace_slug
+            value: $(tt.params.workspace_slug)
+          - name: repository_name
+            value: $(tt.params.repository_name)
+          - name: repository_html_link
+            value: $(tt.params.repository_html_link)
+          - name: actor_acount_id
+            value: $(tt.params.actor_acount_id)
+          - name: actor_nickname
+            value: $(tt.params.actor_nickname)
+          - name: branch_new_name
+            value: $(tt.params.branch_new_name)
+          - name: branch_old_name
+            value: $(tt.params.branch_old_name)
+          - name: push_new_hash
+            value: $(tt.params.push_new_hash)
+        pipelineSpec:
+          params:
+            - name: source_ip
+            - name: event_type
+            - name: trigger_target
+            - name: workspace_slug
+            - name: repository_name
+            - name: repository_html_link
+            - name: actor_acount_id
+            - name: actor_nickname
+            - name: branch_new_name
+            - name: branch_old_name
+            - name: push_new_hash
+          tasks:
+            - name: pipelines-as-code
+              taskSpec:
+                params:
+                  - name: source_ip
+                    type: string
+                  - name: event_type
+                    type: string
+                  - name: trigger_target
+                    type: string
+                  - name: workspace_slug
+                    type: string
+                  - name: repository_name
+                    type: string
+                  - name: repository_html_link
+                    type: string
+                  - name: actor_acount_id
+                    type: string
+                  - name: actor_nickname
+                    type: string
+                  - name: branch_new_name
+                    type: string
+                  - name: branch_old_name
+                    type: string
+                  - name: push_new_hash
+                    type: string
+                steps:
+                  - name: apply-and-launch
+                    env:
+                      - name: PAC_APPLICATION_NAME
+                        valueFrom:
+                          configMapKeyRef:
+                            name: pipelines-as-code
+                            key: application-name
+                      - name: PAC_SECRET_AUTO_CREATE
+                        valueFrom:
+                          configMapKeyRef:
+                            name: pipelines-as-code
+                            key: secret-auto-create
+                      - name: PAC_BITBUCKET_CLOUD_CHECK_SOURCE_IP
+                        valueFrom:
+                          configMapKeyRef:
+                            name: pipelines-as-code
+                            key: bitbucket-cloud-check-source-ip
+                      - name: PAC_WEBVCS_TYPE
+                        value: "bitbucket-cloud"
+                    imagePullPolicy: Always
+                    image: "quay.io/openshift-pipeline/pipelines-as-code:main"
+                    script: |
+                      cat << EOF |tee /tmp/payload.json
+                      {
+                       "repository": {
+                           "workspace": {
+                               "slug": "$(params.workspace_slug)"
+                           },
+                           "name": "$(params.repository_name)",
+                           "links": {
+                               "html": {
+                                   "href": "$(params.repository_html_link)"
+                               }
+                           }
+                       },
+                       "actor": {
+                           "account_id": "$(params.actor_acount_id)",
+                           "nickname": "$(params.actor_nickname)"
+                       },
+                       "push": {
+                           "changes": [{
+                               "new": {
+                                   "name": "$(params.branch_new_name)",
+                                   "target": {
+                                       "hash": "$(params.push_new_hash)"
+                                   }
+                               },
+                               "old": {
+                                   "name": "$(params.branch_old_name)"
+                               }
+                           }]
+                       }
+                      }
+                      EOF
+                      export PAC_SOURCE_IP="$(params.source_ip)"
+                      env|grep '^PAC'|sed 's/TOKEN=.*/TOKEN=HIDDENTOKEN/'
+                      pipelines-as-code --trigger-target=$(params.trigger_target) \
+                        --payload-file=/tmp/payload.json \
+                        --webhook-type="$(params.event_type)"
+              params:
+                - name: source_ip
+                  value: $(params.source_ip)
+                - name: event_type
+                  value: $(params.event_type)
+                - name: trigger_target
+                  value: $(params.trigger_target)
+                - name: workspace_slug
+                  value: $(params.workspace_slug)
+                - name: repository_name
+                  value: $(params.repository_name)
+                - name: repository_html_link
+                  value: $(params.repository_html_link)
+                - name: actor_acount_id
+                  value: $(params.actor_acount_id)
+                - name: actor_nickname
+                  value: $(params.actor_nickname)
+                - name: branch_new_name
+                  value: $(params.branch_new_name)
+                - name: branch_old_name
+                  value: $(params.branch_old_name)
+                - name: push_new_hash
+                  value: $(params.push_new_hash)
+---
+# Copyright 2021 Red Hat
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: TriggerBinding
+metadata:
+  name: pipelines-as-code-bitbucket-retest-comment
+  namespace: pipelines-as-code
+  labels:
+    app.kubernetes.io/instance: default
+    app.kubernetes.io/part-of: pipelines-as-code
+spec:
+  params:
+    - name: event_type
+      value: "pull_request"
+    - name: trigger_target
+      value: "retest-comment"
+
+---
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: TriggerBinding
+metadata:
+  name: pipelines-as-code-bitbucket-ok-to-test-comment
+  namespace: pipelines-as-code
+  labels:
+    app.kubernetes.io/instance: default
+    app.kubernetes.io/part-of: pipelines-as-code
+spec:
+  params:
+    - name: event_type
+      value: "pull_request"
+    - name: trigger_target
+      value: "ok-to-test-comment"
 ---
 # Copyright 2021 Red Hat
 #
