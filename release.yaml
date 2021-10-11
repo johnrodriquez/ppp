@@ -407,9 +407,9 @@ spec:
                   'installation' in body &&
                   body.comment.body.matches('(^|\\r\\n)/retest([ ]*$|$|\\r\\n)')
       bindings:
-        - ref: pipelines-as-code-bindings-retest-comment
+        - ref: pipelines-as-code-github-retest-comment
       template:
-        ref: pipelines-as-code-template-retest-comment
+        ref: pipelines-as-code-github-retest-comment
 
     # When you have a /ok-to-test in a comment to allow CI on a non owner sender
     - name: github-issue-comment-ok-to-test
@@ -435,10 +435,10 @@ spec:
                   'installation' in body &&
                   body.comment.body.matches('(^|\\r\\n)/ok-to-test([ ]*$|$|\\r\\n)')
       bindings:
-        - ref: pipelines-as-code-bindings-ok-to-test-comment
+        - ref: pipelines-as-code-github-ok-to-test-comment
       template:
         # Using the templateRef from retest since they are mostly the same
-        ref: pipelines-as-code-template-retest-comment
+        ref: pipelines-as-code-github-retest-comment
 
     # Branch push using different binding but same triggertemplate as pullreq
     - name: github-branch-push
@@ -460,9 +460,9 @@ spec:
               value: >-
                 'pusher' in body
       bindings:
-        - ref: pipelines-as-code-bindings-push
+        - ref: pipelines-as-code-github-push
       template:
-        ref: pipelines-as-code-template-push
+        ref: pipelines-as-code-github-push
 
     # When using the UI and clicking on Re-run failed test
     - name: github-check-run-recheck
@@ -485,9 +485,9 @@ spec:
                 body.action in ['rerequested'] &&
                 'check_run' in body
       bindings:
-        - ref: pipelines-as-code-bindings-recheck
+        - ref: pipelines-as-code-github-recheck
       template:
-        ref: pipelines-as-code-template-recheck
+        ref: pipelines-as-code-github-recheck
 
     # GitHub When sending a new Pull Request
     - name: github-pull-request
@@ -509,9 +509,9 @@ spec:
               value: >-
                 body.action in ['created', 'synchronize', 'opened']
       bindings:
-        - ref: pipelines-as-code-bindings-pullreq
+        - ref: pipelines-as-code-github-pullreq
       template:
-        ref: pipelines-as-code-template-pullreq
+        ref: pipelines-as-code-github-pullreq
 
     # Bitbucket Cloud event when sending a new Pull Request
     - name: bitbucket-cloud-pull-request
@@ -607,7 +607,7 @@ spec:
 apiVersion: triggers.tekton.dev/v1alpha1
 kind: TriggerBinding
 metadata:
-  name: pipelines-as-code-bindings-recheck
+  name: pipelines-as-code-github-recheck
   namespace: pipelines-as-code
   labels:
     app.kubernetes.io/instance: default
@@ -645,7 +645,7 @@ spec:
 apiVersion: triggers.tekton.dev/v1alpha1
 kind: TriggerTemplate
 metadata:
-  name: pipelines-as-code-template-recheck
+  name: pipelines-as-code-github-recheck
   namespace: pipelines-as-code
   labels:
     app.kubernetes.io/instance: default
@@ -722,20 +722,10 @@ spec:
           workspaces:
             - name: secrets
           tasks:
-            - name: get-token
-              taskRef:
-                name: github-app-token
-              params:
-                - name: github_api_url
-                  value: $(params.ghe_host)
-                - name: installation_id
-                  value: $(params.installation_id)
-              workspaces:
-                - name: secrets
-                  workspace: secrets
             - name: pipelines-as-code
-              runAfter: [get-token]
               taskSpec:
+                workspaces:
+                  - name: secrets
                 params:
                   - name: ghe_host
                     type: string
@@ -760,9 +750,9 @@ spec:
                     default: "000"
                   - name: sender
                     type: string
-                  - name: token
-                    type: string
                   - name: trigger_target
+                    type: string
+                  - name: installation_id
                     type: string
                 steps:
                   - name: apply-and-launch
@@ -779,18 +769,27 @@ spec:
                           configMapKeyRef:
                             name: pipelines-as-code
                             key: secret-auto-create
-                      - name: PAC_WEBVCS_URL
+                      - name: PAC_WEBVCS_APIURL
                         value: $(params.ghe_host)
-                      - name: PAC_WEBVCS_TOKEN
-                        value: $(params.token)
                       - name: PAC_WEBVCS_TYPE
                         value: "github"
+                      - name: PAC_TRIGGER_TARGET
+                        value: $(params.trigger_target)
+                      - name: PAC_WEBHOOK_TYPE
+                        value: $(params.event_type)
+                      - name: PAC_INSTALLATION_ID
+                        value: $(params.installation_id)
+                      - name: PAC_WORKSPACE_SECRET
+                        value: $(workspaces.secrets.path)
+                      - name: PAC_PAYLOAD_FILE
+                        value: "/tmp/payload.json"
                     script: |
                       #!/usr/bin/env bash
-                      set -eux
+                      set -euf
+                      set +x
                       prnumber=$(params.pull_request_number)
                       [[ ${prnumber} != "[]" ]] && prnumber="[{\"number\": ${prnumber}}]"
-                      cat << EOF > /tmp/payload.json
+                      cat << EOF |tee ${PAC_PAYLOAD_FILE}
                       {
                         "action": "$(params.action)",
                         "check_run": {
@@ -813,10 +812,8 @@ spec:
                         }
                       }
                       EOF
-                      env|grep '^PAC'|sed 's/TOKEN=.*/TOKEN=HIDDENTOKEN/'
-                      cat /tmp/payload.json
-                      pipelines-as-code --trigger-target=$(params.trigger_target) --webhook-type="$(params.event_type)" \
-                        --payload-file=/tmp/payload.json
+                      env|grep '^PAC'
+                      pipelines-as-code
               params:
                 - name: ghe_host
                   value: $(params.ghe_host)
@@ -842,12 +839,780 @@ spec:
                   value: "$(params.pull_request_number)"
                 - name: sender
                   value: "$(params.sender)"
-                - name: token
-                  value: "$(tasks.get-token.results.token)"
+                - name: installation_id
+                  value: $(params.installation_id)
+              workspaces:
+                - name: secrets
+                  workspace: secrets
         workspaces:
           - name: secrets
             secret:
               secretName: github-app-secret
+---
+# Copyright 2021 Red Hat
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: TriggerBinding
+metadata:
+  name: pipelines-as-code-github-pullreq
+  namespace: pipelines-as-code
+  labels:
+    app.kubernetes.io/instance: default
+    app.kubernetes.io/part-of: pipelines-as-code
+spec:
+  params:
+    - name: trigger_target
+      value: "pull-request"
+    - name: "event_type"
+      value: $(header.X-GitHub-Event)
+    - name: "ghe_host"
+      value: $(header.X-GitHub-Enterprise-Host)
+    - name: "owner"
+      value: $(body.repository.owner.login)
+    - name: "repository"
+      value: $(body.repository.name)
+    - name: "default_branch"
+      value: $(body.repository.default_branch)
+    - name: "url"
+      value: $(body.repository.html_url)
+    - name: "sender"
+      value: $(body.pull_request.user.login)
+    - name: "base_ref"
+      value: $(body.pull_request.base.ref)
+    - name: "pull_request_number"
+      value: $(body.pull_request.number)
+    - name: "pull_request_html_url"
+      value: $(body.pull_request.html_url)
+    - name: "sha"
+      value: $(body.pull_request.head.sha)
+    - name: "head_ref"
+      value: $(body.pull_request.head.ref)
+    - name: "installation_id"
+      value: $(body.installation.id)
+---
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: TriggerTemplate
+metadata:
+  name: pipelines-as-code-github-pullreq
+  namespace: pipelines-as-code
+  labels:
+    app.kubernetes.io/instance: default
+    app.kubernetes.io/part-of: pipelines-as-code
+spec:
+  params:
+    - name: event_type
+    - name: owner
+    - name: repository
+    - name: default_branch
+    - name: url
+    - name: sender
+    - name: base_ref
+    - name: pull_request_number
+    - name: pull_request_html_url
+    - name: sha
+    - name: head_ref
+    - name: installation_id
+      default: ""
+    - name: trigger_target
+    - name: ghe_host
+      default: "api.github.com"
+  resourcetemplates:
+    - apiVersion: tekton.dev/v1beta1
+      kind: PipelineRun
+      metadata:
+        generateName: pipelines-as-code-run-
+        labels:
+          app.kubernetes.io/managed-by: pipelines-as-code
+          pipelinesascode.tekton.dev/event: $(tt.params.event_type)
+      spec:
+        serviceAccountName: pipelines-as-code-sa-el
+        params:
+          - name: ghe_host
+            value: $(tt.params.ghe_host)
+          - name: event_type
+            value: $(tt.params.event_type)
+          - name: trigger_target
+            value: $(tt.params.trigger_target)
+          - name: owner
+            value: $(tt.params.owner)
+          - name: repository
+            value: $(tt.params.repository)
+          - name: default_branch
+            value: $(tt.params.default_branch)
+          - name: url
+            value: $(tt.params.url)
+          - name: sender
+            value: $(tt.params.sender)
+          - name: base_ref
+            value: $(tt.params.base_ref)
+          - name: pull_request_number
+            value: $(tt.params.pull_request_number)
+          - name: pull_request_html_url
+            value: $(tt.params.pull_request_html_url)
+          - name: sha
+            value: $(tt.params.sha)
+          - name: head_ref
+            value: $(tt.params.head_ref)
+          - name: installation_id
+            value: $(tt.params.installation_id)
+        pipelineSpec:
+          params:
+            - name: ghe_host
+            - name: event_type
+            - name: trigger_target
+            - name: owner
+            - name: repository
+            - name: default_branch
+            - name: url
+            - name: sender
+            - name: base_ref
+            - name: pull_request_number
+            - name: pull_request_html_url
+            - name: sha
+            - name: head_ref
+            - name: installation_id
+          workspaces:
+            - name: secrets
+          tasks:
+            - name: pipelines-as-code
+              taskSpec:
+                workspaces:
+                  - name: secrets
+                params:
+                  - name: ghe_host
+                    type: string
+                  - name: trigger_target
+                    type: string
+                  - name: event_type
+                    type: string
+                  - name: owner
+                    type: string
+                  - name: repository
+                    type: string
+                  - name: default_branch
+                    type: string
+                  - name: url
+                    type: string
+                  - name: sender
+                    type: string
+                  - name: base_ref
+                    type: string
+                  - name: pull_request_number
+                    type: string
+                  - name: pull_request_html_url
+                    type: string
+                  - name: sha
+                    type: string
+                  - name: head_ref
+                    type: string
+                  - name: installation_id
+                    type: string
+                steps:
+                  - name: apply-and-launch
+                    env:
+                      - name: PAC_APPLICATION_NAME
+                        valueFrom:
+                          configMapKeyRef:
+                            name: pipelines-as-code
+                            key: application-name
+                      - name: PAC_SECRET_AUTO_CREATE
+                        valueFrom:
+                          configMapKeyRef:
+                            name: pipelines-as-code
+                            key: secret-auto-create
+                      - name: PAC_WEBVCS_APIURL
+                        value: $(params.ghe_host)
+                      - name: PAC_WEBVCS_TYPE
+                        value: "github"
+                      - name: PAC_INSTALLATION_ID
+                        value: $(params.installation_id)
+                      - name: PAC_WORKSPACE_SECRET
+                        value: $(workspaces.secrets.path)
+                      - name: PAC_PAYLOAD_FILE
+                        value: "/tmp/payload.json"
+                      - name: PAC_TRIGGER_TARGET
+                        value: "$(params.trigger_target)"
+                      - name: PAC_WEBHOOK_TYPE
+                        value: "$(params.event_type)"
+                    imagePullPolicy: Always
+                    image: "quay.io/openshift-pipeline/pipelines-as-code:main"
+                    script: |
+                      #!/usr/bin/env bash
+                      set -euf
+                      set +x
+                      cat << EOF|tee ${PAC_PAYLOAD_FILE}
+                      {
+                          "repository": {
+                              "owner": {
+                                  "login": "$(params.owner)"
+                              },
+                              "name": "$(params.repository)",
+                              "default_branch": "$(params.default_branch)",
+                              "html_url": "$(params.url)"
+                          },
+                          "pull_request": {
+                              "number": $(params.pull_request_number),
+                              "html_url": "$(params.pull_request_html_url)",
+                              "user": {
+                                  "login": "$(params.sender)"
+                              },
+                              "base": {
+                                  "ref": "$(params.base_ref)"
+                              },
+                              "head": {
+                                  "sha": "$(params.sha)",
+                                  "ref": "$(params.head_ref)"
+                              }
+                          }
+                      }
+                      EOF
+                      env|grep '^PAC'
+                      pipelines-as-code
+              params:
+                - name: ghe_host
+                  value: $(params.ghe_host)
+                - name: event_type
+                  value: $(params.event_type)
+                - name: trigger_target
+                  value: $(params.trigger_target)
+                - name: owner
+                  value: $(params.owner)
+                - name: repository
+                  value: $(params.repository)
+                - name: default_branch
+                  value: $(params.default_branch)
+                - name: url
+                  value: $(params.url)
+                - name: sender
+                  value: $(params.sender)
+                - name: base_ref
+                  value: $(params.base_ref)
+                - name: pull_request_number
+                  value: $(params.pull_request_number)
+                - name: pull_request_html_url
+                  value: $(params.pull_request_html_url)
+                - name: sha
+                  value: $(params.sha)
+                - name: head_ref
+                  value: $(params.head_ref)
+                - name: installation_id
+                  value: $(params.installation_id)
+              workspaces:
+                - name: secrets
+                  workspace: secrets
+        workspaces:
+          - name: secrets
+            secret:
+              secretName: github-app-secret
+---
+# Copyright 2021 Red Hat
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: TriggerBinding
+metadata:
+  name: pipelines-as-code-github-push
+  namespace: pipelines-as-code
+  labels:
+    app.kubernetes.io/instance: default
+    app.kubernetes.io/part-of: pipelines-as-code
+spec:
+  params:
+    - name: "event_type"
+      value: $(header.X-GitHub-Event)
+    - name: "ghe_host"
+      value: $(header.X-GitHub-Enterprise-Host)
+    - name: "trigger_target"
+      value: "push"
+    - name: "owner"
+      value: $(body.repository.owner.login)
+    - name: "repository"
+      value: $(body.repository.name)
+    - name: "default_branch"
+      value: $(body.repository.default_branch)
+    - name: "sha"
+      value: $(body.head_commit.id)
+    - name: "url"
+      value: $(body.repository.html_url)
+    - name: "sender"
+      value: $(body.sender.login)
+    - name: "base_ref"
+      value: $(body.ref)
+    - name: "head_ref" # head ref become the same as base ref
+      value: $(body.ref)
+    - name: "installation_id"
+      value: $(body.installation.id)
+
+---
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: TriggerTemplate
+metadata:
+  name: pipelines-as-code-github-push
+  namespace: pipelines-as-code
+  labels:
+    app.kubernetes.io/instance: default
+    app.kubernetes.io/part-of: pipelines-as-code
+spec:
+  params:
+    - name: event_type
+    - name: ghe_host
+      default: "api.github.com"
+    - name: owner
+    - name: repository
+    - name: default_branch
+    - name: url
+    - name: sender
+    - name: base_ref
+    - name: sha
+    - name: head_ref
+    - name: installation_id
+      default: ""
+    - name: trigger_target
+  resourcetemplates:
+    - apiVersion: tekton.dev/v1beta1
+      kind: PipelineRun
+      metadata:
+        generateName: pipelines-as-code-run-
+        labels:
+          app.kubernetes.io/managed-by: pipelines-as-code
+          pipelinesascode.tekton.dev/event: $(tt.params.event_type)
+      spec:
+        serviceAccountName: pipelines-as-code-sa-el
+        params:
+          - name: ghe_host
+            value: $(tt.params.ghe_host)
+          - name: event_type
+            value: $(tt.params.event_type)
+          - name: trigger_target
+            value: $(tt.params.trigger_target)
+          - name: owner
+            value: $(tt.params.owner)
+          - name: repository
+            value: $(tt.params.repository)
+          - name: default_branch
+            value: $(tt.params.default_branch)
+          - name: url
+            value: $(tt.params.url)
+          - name: sender
+            value: $(tt.params.sender)
+          - name: base_ref
+            value: $(tt.params.base_ref)
+          - name: sha
+            value: $(tt.params.sha)
+          - name: head_ref
+            value: $(tt.params.head_ref)
+          - name: installation_id
+            value: $(tt.params.installation_id)
+        pipelineSpec:
+          params:
+            - name: ghe_host
+            - name: event_type
+            - name: trigger_target
+            - name: owner
+            - name: repository
+            - name: default_branch
+            - name: url
+            - name: sender
+            - name: base_ref
+            - name: sha
+            - name: head_ref
+            - name: installation_id
+          workspaces:
+            - name: secrets
+          tasks:
+            - name: pipelines-as-code
+              taskSpec:
+                workspaces:
+                  - name: secrets
+                params:
+                  - name: ghe_host
+                    type: string
+                  - name: trigger_target
+                    type: string
+                  - name: event_type
+                    type: string
+                  - name: owner
+                    type: string
+                  - name: repository
+                    type: string
+                  - name: default_branch
+                    type: string
+                  - name: url
+                    type: string
+                  - name: sender
+                    type: string
+                  - name: base_ref
+                    type: string
+                  - name: sha
+                    type: string
+                  - name: head_ref
+                    type: string
+                  - name: installation_id
+                    type: string
+                steps:
+                  - name: apply-and-launch
+                    imagePullPolicy: Always
+                    image: "quay.io/openshift-pipeline/pipelines-as-code:main"
+                    env:
+                      - name: PAC_APPLICATION_NAME
+                        valueFrom:
+                          configMapKeyRef:
+                            name: pipelines-as-code
+                            key: application-name
+                      - name: PAC_SECRET_AUTO_CREATE
+                        valueFrom:
+                          configMapKeyRef:
+                            name: pipelines-as-code
+                            key: secret-auto-create
+                      - name: PAC_WEBVCS_APIURL
+                        value: $(params.ghe_host)
+                      - name: PAC_WEBVCS_TYPE
+                        value: "github"
+                      - name: PAC_TRIGGER_TARGET
+                        value: $(params.trigger_target)
+                      - name: PAC_WEBHOOK_TYPE
+                        value: $(params.event_type)
+                      - name: PAC_INSTALLATION_ID
+                        value: $(params.installation_id)
+                      - name: PAC_WORKSPACE_SECRET
+                        value: $(workspaces.secrets.path)
+                      - name: PAC_PAYLOAD_FILE
+                        value: "/tmp/payload.json"
+                    script: |
+                      #!/usr/bin/env bash
+                      set -euf
+                      set +x
+                      cat << EOF|tee ${PAC_PAYLOAD_FILE}
+                      {
+                        "repository": {
+                          "owner": {
+                            "login": "$(params.owner)"
+                          },
+                          "name": "$(params.repository)",
+                          "default_branch": "$(params.default_branch)",
+                          "html_url": "$(params.url)"
+                        },
+                        "sender": {
+                          "login": "$(params.sender)"
+                        },
+                        "ref": "$(params.base_ref)",
+                        "head_commit": {
+                          "id": "$(params.sha)"
+                        }
+                      }
+                      EOF
+                      env|grep '^PAC'
+                      pipelines-as-code
+              params:
+                - name: ghe_host
+                  value: $(params.ghe_host)
+                - name: event_type
+                  value: $(params.event_type)
+                - name: trigger_target
+                  value: $(params.trigger_target)
+                - name: owner
+                  value: $(params.owner)
+                - name: repository
+                  value: $(params.repository)
+                - name: default_branch
+                  value: $(params.default_branch)
+                - name: url
+                  value: $(params.url)
+                - name: sender
+                  value: $(params.sender)
+                - name: base_ref
+                  value: $(params.base_ref)
+                - name: sha
+                  value: $(params.sha)
+                - name: head_ref
+                  value: $(params.head_ref)
+                - name: installation_id
+                  value: $(params.installation_id)
+              workspaces:
+                - name: secrets
+                  workspace: secrets
+
+        workspaces:
+          - name: secrets
+            secret:
+              secretName: github-app-secret
+---
+# Copyright 2021 Red Hat
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: TriggerBinding
+metadata:
+  name: pipelines-as-code-github-retest-comment
+  namespace: pipelines-as-code
+  labels:
+    app.kubernetes.io/instance: default
+    app.kubernetes.io/part-of: pipelines-as-code
+spec:
+  params:
+    - name: trigger_target
+      value: "retest-comment"
+    - name: action
+      value: $(body.action)
+    - name: event_type
+      value: $(header.X-GitHub-Event)
+    - name: "ghe_host"
+      value: $(header.X-GitHub-Enterprise-Host)
+    - name: owner
+      value: $(body.repository.owner.login)
+    - name: sender
+      value: $(body.sender.login)
+    - name: repository
+      value: $(body.repository.name)
+    - name: pull_request_url
+      value: $(body.issue.pull_request.html_url)
+    - name: installation_id
+      value: $(body.installation.id)
+---
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: TriggerTemplate
+metadata:
+  name: pipelines-as-code-github-retest-comment
+  namespace: pipelines-as-code
+  labels:
+    app.kubernetes.io/instance: default
+    app.kubernetes.io/part-of: pipelines-as-code
+spec:
+  params:
+    - name: action
+    - name: event_type
+    - name: owner
+    - name: sender
+    - name: repository
+    - name: pull_request_url
+    - name: installation_id
+      default: ""
+    - name: trigger_target
+    - name: ghe_host
+      default: "api.github.com"
+  resourcetemplates:
+    - apiVersion: tekton.dev/v1beta1
+      kind: PipelineRun
+      metadata:
+        generateName: pipelines-as-code-run-
+        labels:
+          app.kubernetes.io/managed-by: pipelines-as-code
+          pipelinesascode.tekton.dev/event: $(tt.params.event_type)
+      spec:
+        serviceAccountName: pipelines-as-code-sa-el
+        params:
+          - name: ghe_host
+            value: $(tt.params.ghe_host)
+          - name: action
+            value: $(tt.params.action)
+          - name: event_type
+            value: $(tt.params.event_type)
+          - name: trigger_target
+            value: $(tt.params.trigger_target)
+          - name: owner
+            value: $(tt.params.owner)
+          - name: sender
+            value: $(tt.params.sender)
+          - name: repository
+            value: $(tt.params.repository)
+          - name: pull_request_url
+            value: $(tt.params.pull_request_url)
+          - name: installation_id
+            value: $(tt.params.installation_id)
+        pipelineSpec:
+          params:
+            - name: action
+            - name: trigger_target
+            - name: ghe_host
+            - name: event_type
+            - name: owner
+            - name: sender
+            - name: repository
+            - name: pull_request_url
+            - name: installation_id
+          workspaces:
+            - name: secrets
+          tasks:
+            - name: pipelines-as-code
+              taskSpec:
+                workspaces:
+                  - name: secrets
+                params:
+                  - name: action
+                    type: string
+                  - name: ghe_host
+                    type: string
+                  - name: event_type
+                    type: string
+                  - name: owner
+                    type: string
+                  - name: sender
+                    type: string
+                  - name: repository
+                    type: string
+                  - name: pull_request_url
+                    type: string
+                  - name: trigger_target
+                    type: string
+                  - name: installation_id
+                    type: string
+                steps:
+                  - name: apply-and-launch
+                    imagePullPolicy: Always
+                    image: "quay.io/openshift-pipeline/pipelines-as-code:main"
+                    env:
+                      - name: PAC_APPLICATION_NAME
+                        valueFrom:
+                          configMapKeyRef:
+                            name: pipelines-as-code
+                            key: application-name
+                      - name: PAC_SECRET_AUTO_CREATE
+                        valueFrom:
+                          configMapKeyRef:
+                            name: pipelines-as-code
+                            key: secret-auto-create
+                      - name: PAC_WEBVCS_APIURL
+                        value: $(params.ghe_host)
+                      - name: PAC_WEBVCS_TYPE
+                        value: "github"
+                      - name: PAC_INSTALLATION_ID
+                        value: $(params.installation_id)
+                      - name: PAC_WORKSPACE_SECRET
+                        value: $(workspaces.secrets.path)
+                      - name: PAC_TRIGGER_TARGET
+                        value: "$(params.trigger_target)"
+                      - name: PAC_WEBHOOK_TYPE
+                        value: "$(params.event_type)"
+                      - name: PAC_PAYLOAD_FILE
+                        value: "/tmp/payload.json"
+                    script: |
+                      #!/usr/bin/env bash
+                      set -euf
+                      set +x
+                      cat << EOF|tee ${PAC_PAYLOAD_FILE}
+                      {
+                        "action": "$(params.action)",
+                        "issue": {
+                          "pull_request": {
+                            "html_url": "$(params.pull_request_url)"
+                          }
+                        },
+                        "sender": {
+                           "login": "$(params.sender)"
+                         },
+                        "repository": {
+                            "name": "$(params.repository)",
+                            "owner": {
+                              "login": "$(params.owner)"
+                            }
+                        }
+                      }
+                      EOF
+                      env|grep '^PAC'
+                      pipelines-as-code
+              params:
+                - name: action
+                  value: "$(params.action)"
+                - name: ghe_host
+                  value: "$(params.ghe_host)"
+                - name: trigger_target
+                  value: "$(params.trigger_target)"
+                - name: event_type
+                  value: "$(params.event_type)"
+                - name: owner
+                  value: "$(params.owner)"
+                - name: sender
+                  value: "$(params.sender)"
+                - name: repository
+                  value: "$(params.repository)"
+                - name: pull_request_url
+                  value: "$(params.pull_request_url)"
+                - name: installation_id
+                  value: $(params.installation_id)
+              workspaces:
+                - name: secrets
+                  workspace: secrets
+        workspaces:
+          - name: secrets
+            secret:
+              secretName: github-app-secret
+---
+# Copyright 2021 Red Hat
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: TriggerBinding
+metadata:
+  name: pipelines-as-code-github-ok-to-test-comment
+  namespace: pipelines-as-code
+  labels:
+    app.kubernetes.io/instance: default
+    app.kubernetes.io/part-of: pipelines-as-code
+spec:
+  params:
+    - name: action
+      value: "$(body.action)"
+    - name: trigger_target
+      value: "ok-to-test-comment"
+    - name: event_type
+      value: $(header.X-GitHub-Event)
+    - name: "ghe_host"
+      value: $(header.X-GitHub-Enterprise-Host)
+    - name: owner
+      value: $(body.repository.owner.login)
+    - name: sender
+      value: $(body.sender.login)
+    - name: repository
+      value: $(body.repository.name)
+    - name: pull_request_url
+      value: $(body.issue.pull_request.html_url)
+    - name: installation_id
+      value: $(body.installation.id)
 ---
 # Copyright 2021 Red Hat
 #
@@ -1036,10 +1801,21 @@ spec:
                             key: bitbucket-cloud-additional-source-ip
                       - name: PAC_WEBVCS_TYPE
                         value: "bitbucket-cloud"
+                      - name: PAC_TRIGGER_TARGET
+                        value: "$(params.trigger_target)"
+                      - name: PAC_WEBHOOK_TYPE
+                        value: "$(params.event_type)"
+                      - name: PAC_PAYLOAD_FILE
+                        value: "/tmp/payload.json"
+                      - name: PAC_SOURCE_IP
+                        value: $(params.source_ip)
                     imagePullPolicy: Always
                     image: "quay.io/openshift-pipeline/pipelines-as-code:main"
                     script: |
-                      cat << EOF |tee /tmp/payload.json
+                      #!/usr/bin/env bash
+                      set -euf
+                      set +x
+                      cat << EOF|tee ${PAC_PAYLOAD_FILE}
                       {
                           "repository": {
                               "workspace": {
@@ -1074,11 +1850,8 @@ spec:
                           }
                       }
                       EOF
-                      export PAC_SOURCE_IP="$(params.source_ip)"
-                      env|grep '^PAC'|sed 's/TOKEN=.*/TOKEN=HIDDENTOKEN/'
-                      pipelines-as-code --trigger-target=$(params.trigger_target) \
-                        --payload-file=/tmp/payload.json \
-                        --webhook-type="$(params.event_type)"
+                      env|grep '^PAC'
+                      pipelines-as-code
               params:
                 - name: source_ip
                   value: $(params.source_ip)
@@ -1270,10 +2043,21 @@ spec:
                             key: bitbucket-cloud-additional-source-ip
                       - name: PAC_WEBVCS_TYPE
                         value: "bitbucket-cloud"
+                      - name: PAC_TRIGGER_TARGET
+                        value: "$(params.trigger_target)"
+                      - name: PAC_WEBHOOK_TYPE
+                        value: "$(params.event_type)"
+                      - name: PAC_PAYLOAD_FILE
+                        value: "/tmp/payload.json"
+                      - name: PAC_SOURCE_IP
+                        value: $(params.source_ip)
                     imagePullPolicy: Always
                     image: "quay.io/openshift-pipeline/pipelines-as-code:main"
                     script: |
-                      cat << EOF |tee /tmp/payload.json
+                      #!/usr/bin/env bash
+                      set -euf
+                      set +x
+                      cat << EOF|tee ${PAC_PAYLOAD_FILE}
                       {
                        "repository": {
                            "workspace": {
@@ -1305,11 +2089,8 @@ spec:
                        }
                       }
                       EOF
-                      export PAC_SOURCE_IP="$(params.source_ip)"
-                      env|grep '^PAC'|sed 's/TOKEN=.*/TOKEN=HIDDENTOKEN/'
-                      pipelines-as-code --trigger-target=$(params.trigger_target) \
-                        --payload-file=/tmp/payload.json \
-                        --webhook-type="$(params.event_type)"
+                      env|grep '^PAC'
+                      pipelines-as-code
               params:
                 - name: source_ip
                   value: $(params.source_ip)
@@ -1378,957 +2159,6 @@ spec:
       value: "pull_request"
     - name: trigger_target
       value: "ok-to-test-comment"
----
-# Copyright 2021 Red Hat
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
-apiVersion: triggers.tekton.dev/v1alpha1
-kind: TriggerBinding
-metadata:
-  name: pipelines-as-code-bindings-pullreq
-  namespace: pipelines-as-code
-  labels:
-    app.kubernetes.io/instance: default
-    app.kubernetes.io/part-of: pipelines-as-code
-spec:
-  params:
-    - name: trigger_target
-      value: "pull-request"
-    - name: "event_type"
-      value: $(header.X-GitHub-Event)
-    - name: "ghe_host"
-      value: $(header.X-GitHub-Enterprise-Host)
-    - name: "owner"
-      value: $(body.repository.owner.login)
-    - name: "repository"
-      value: $(body.repository.name)
-    - name: "default_branch"
-      value: $(body.repository.default_branch)
-    - name: "url"
-      value: $(body.repository.html_url)
-    - name: "sender"
-      value: $(body.pull_request.user.login)
-    - name: "base_ref"
-      value: $(body.pull_request.base.ref)
-    - name: "pull_request_number"
-      value: $(body.pull_request.number)
-    - name: "pull_request_html_url"
-      value: $(body.pull_request.html_url)
-    - name: "sha"
-      value: $(body.pull_request.head.sha)
-    - name: "head_ref"
-      value: $(body.pull_request.head.ref)
-    - name: "installation_id"
-      value: $(body.installation.id)
----
-apiVersion: triggers.tekton.dev/v1alpha1
-kind: TriggerTemplate
-metadata:
-  name: pipelines-as-code-template-pullreq
-  namespace: pipelines-as-code
-  labels:
-    app.kubernetes.io/instance: default
-    app.kubernetes.io/part-of: pipelines-as-code
-spec:
-  params:
-    - name: event_type
-    - name: owner
-    - name: repository
-    - name: default_branch
-    - name: url
-    - name: sender
-    - name: base_ref
-    - name: pull_request_number
-    - name: pull_request_html_url
-    - name: sha
-    - name: head_ref
-    - name: installation_id
-      default: ""
-    - name: trigger_target
-    - name: ghe_host
-      default: "api.github.com"
-  resourcetemplates:
-    - apiVersion: tekton.dev/v1beta1
-      kind: PipelineRun
-      metadata:
-        generateName: pipelines-as-code-run-
-        labels:
-          app.kubernetes.io/managed-by: pipelines-as-code
-          pipelinesascode.tekton.dev/event: $(tt.params.event_type)
-      spec:
-        serviceAccountName: pipelines-as-code-sa-el
-        params:
-          - name: ghe_host
-            value: $(tt.params.ghe_host)
-          - name: event_type
-            value: $(tt.params.event_type)
-          - name: trigger_target
-            value: $(tt.params.trigger_target)
-          - name: owner
-            value: $(tt.params.owner)
-          - name: repository
-            value: $(tt.params.repository)
-          - name: default_branch
-            value: $(tt.params.default_branch)
-          - name: url
-            value: $(tt.params.url)
-          - name: sender
-            value: $(tt.params.sender)
-          - name: base_ref
-            value: $(tt.params.base_ref)
-          - name: pull_request_number
-            value: $(tt.params.pull_request_number)
-          - name: pull_request_html_url
-            value: $(tt.params.pull_request_html_url)
-          - name: sha
-            value: $(tt.params.sha)
-          - name: head_ref
-            value: $(tt.params.head_ref)
-          - name: installation_id
-            value: $(tt.params.installation_id)
-        pipelineSpec:
-          params:
-            - name: ghe_host
-            - name: event_type
-            - name: trigger_target
-            - name: owner
-            - name: repository
-            - name: default_branch
-            - name: url
-            - name: sender
-            - name: base_ref
-            - name: pull_request_number
-            - name: pull_request_html_url
-            - name: sha
-            - name: head_ref
-            - name: installation_id
-          workspaces:
-            - name: secrets
-          tasks:
-            - name: get-token
-              taskRef:
-                name: github-app-token
-              params:
-                - name: github_api_url
-                  value: $(params.ghe_host)
-                - name: installation_id
-                  value: $(params.installation_id)
-              workspaces:
-                - name: secrets
-                  workspace: secrets
-            - name: pipelines-as-code
-              runAfter: [get-token]
-              taskSpec:
-                params:
-                  - name: ghe_host
-                    type: string
-                  - name: trigger_target
-                    type: string
-                  - name: event_type
-                    type: string
-                  - name: owner
-                    type: string
-                  - name: repository
-                    type: string
-                  - name: default_branch
-                    type: string
-                  - name: url
-                    type: string
-                  - name: sender
-                    type: string
-                  - name: base_ref
-                    type: string
-                  - name: pull_request_number
-                    type: string
-                  - name: pull_request_html_url
-                    type: string
-                  - name: sha
-                    type: string
-                  - name: head_ref
-                    type: string
-                  - name: token
-                    type: string
-                steps:
-                  - name: apply-and-launch
-                    env:
-                      - name: PAC_APPLICATION_NAME
-                        valueFrom:
-                          configMapKeyRef:
-                            name: pipelines-as-code
-                            key: application-name
-                      - name: PAC_SECRET_AUTO_CREATE
-                        valueFrom:
-                          configMapKeyRef:
-                            name: pipelines-as-code
-                            key: secret-auto-create
-                      - name: PAC_WEBVCS_URL
-                        value: $(params.ghe_host)
-                      - name: PAC_WEBVCS_TOKEN
-                        value: $(params.token)
-                      - name: PAC_WEBVCS_TYPE
-                        value: "github"
-                    imagePullPolicy: Always
-                    image: "quay.io/openshift-pipeline/pipelines-as-code:main"
-                    script: |
-                      cat << EOF > /tmp/payload.json
-                      {
-                          "repository": {
-                              "owner": {
-                                  "login": "$(params.owner)"
-                              },
-                              "name": "$(params.repository)",
-                              "default_branch": "$(params.default_branch)",
-                              "html_url": "$(params.url)"
-                          },
-                          "pull_request": {
-                              "number": $(params.pull_request_number),
-                              "html_url": "$(params.pull_request_html_url)",
-                              "user": {
-                                  "login": "$(params.sender)"
-                              },
-                              "base": {
-                                  "ref": "$(params.base_ref)"
-                              },
-                              "head": {
-                                  "sha": "$(params.sha)",
-                                  "ref": "$(params.head_ref)"
-                              }
-                          }
-                      }
-                      EOF
-                      env|grep '^PAC'|sed 's/TOKEN=.*/TOKEN=HIDDENTOKEN/'
-                      cat /tmp/payload.json
-                      pipelines-as-code --trigger-target=$(params.trigger_target) \
-                        --payload-file=/tmp/payload.json  \
-                        --webhook-type="$(params.event_type)"
-              params:
-                - name: ghe_host
-                  value: $(params.ghe_host)
-                - name: event_type
-                  value: $(params.event_type)
-                - name: trigger_target
-                  value: $(params.trigger_target)
-                - name: owner
-                  value: $(params.owner)
-                - name: repository
-                  value: $(params.repository)
-                - name: default_branch
-                  value: $(params.default_branch)
-                - name: url
-                  value: $(params.url)
-                - name: sender
-                  value: $(params.sender)
-                - name: base_ref
-                  value: $(params.base_ref)
-                - name: pull_request_number
-                  value: $(params.pull_request_number)
-                - name: pull_request_html_url
-                  value: $(params.pull_request_html_url)
-                - name: sha
-                  value: $(params.sha)
-                - name: head_ref
-                  value: $(params.head_ref)
-                - name: token
-                  value: "$(tasks.get-token.results.token)"
-        workspaces:
-          - name: secrets
-            secret:
-              secretName: github-app-secret
----
-# Copyright 2021 Red Hat
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
-apiVersion: triggers.tekton.dev/v1alpha1
-kind: TriggerBinding
-metadata:
-  name: pipelines-as-code-bindings-push
-  namespace: pipelines-as-code
-  labels:
-    app.kubernetes.io/instance: default
-    app.kubernetes.io/part-of: pipelines-as-code
-spec:
-  params:
-    - name: "event_type"
-      value: $(header.X-GitHub-Event)
-    - name: "ghe_host"
-      value: $(header.X-GitHub-Enterprise-Host)
-    - name: "trigger_target"
-      value: "push"
-    - name: "owner"
-      value: $(body.repository.owner.login)
-    - name: "repository"
-      value: $(body.repository.name)
-    - name: "default_branch"
-      value: $(body.repository.default_branch)
-    - name: "sha"
-      value: $(body.head_commit.id)
-    - name: "url"
-      value: $(body.repository.html_url)
-    - name: "sender"
-      value: $(body.sender.login)
-    - name: "base_ref"
-      value: $(body.ref)
-    - name: "head_ref"  # head ref is the same as base ref
-      value: $(body.ref)
-    - name: "installation_id"
-      value: $(body.installation.id)
-
----
-apiVersion: triggers.tekton.dev/v1alpha1
-kind: TriggerTemplate
-metadata:
-  name: pipelines-as-code-template-push
-  namespace: pipelines-as-code
-  labels:
-    app.kubernetes.io/instance: default
-    app.kubernetes.io/part-of: pipelines-as-code
-spec:
-  params:
-    - name: event_type
-    - name: ghe_host
-      default: "api.github.com"
-    - name: owner
-    - name: repository
-    - name: default_branch
-    - name: url
-    - name: sender
-    - name: base_ref
-    - name: sha
-    - name: head_ref
-    - name: installation_id
-      default: ""
-    - name: trigger_target
-  resourcetemplates:
-    - apiVersion: tekton.dev/v1beta1
-      kind: PipelineRun
-      metadata:
-        generateName: pipelines-as-code-run-
-        labels:
-          app.kubernetes.io/managed-by: pipelines-as-code
-          pipelinesascode.tekton.dev/event: $(tt.params.event_type)
-      spec:
-        serviceAccountName: pipelines-as-code-sa-el
-        params:
-          - name: ghe_host
-            value: $(tt.params.ghe_host)
-          - name: event_type
-            value: $(tt.params.event_type)
-          - name: trigger_target
-            value: $(tt.params.trigger_target)
-          - name: owner
-            value: $(tt.params.owner)
-          - name: repository
-            value: $(tt.params.repository)
-          - name: default_branch
-            value: $(tt.params.default_branch)
-          - name: url
-            value: $(tt.params.url)
-          - name: sender
-            value: $(tt.params.sender)
-          - name: base_ref
-            value: $(tt.params.base_ref)
-          - name: sha
-            value: $(tt.params.sha)
-          - name: head_ref
-            value: $(tt.params.head_ref)
-          - name: installation_id
-            value: $(tt.params.installation_id)
-        pipelineSpec:
-          params:
-            - name: ghe_host
-            - name: event_type
-            - name: trigger_target
-            - name: owner
-            - name: repository
-            - name: default_branch
-            - name: url
-            - name: sender
-            - name: base_ref
-            - name: sha
-            - name: head_ref
-            - name: installation_id
-          workspaces:
-            - name: secrets
-          tasks:
-            - name: get-token
-              taskRef:
-                name: github-app-token
-              params:
-                - name: github_api_url
-                  value: $(params.ghe_host)
-                - name: installation_id
-                  value: $(params.installation_id)
-              workspaces:
-                - name: secrets
-                  workspace: secrets
-            - name: pipelines-as-code
-              runAfter: [get-token]
-              taskSpec:
-                params:
-                  - name: ghe_host
-                    type: string
-                  - name: trigger_target
-                    type: string
-                  - name: event_type
-                    type: string
-                  - name: owner
-                    type: string
-                  - name: repository
-                    type: string
-                  - name: default_branch
-                    type: string
-                  - name: url
-                    type: string
-                  - name: sender
-                    type: string
-                  - name: base_ref
-                    type: string
-                  - name: sha
-                    type: string
-                  - name: head_ref
-                    type: string
-                  - name: token
-                    type: string
-                steps:
-                  - name: apply-and-launch
-                    imagePullPolicy: Always
-                    image: "quay.io/openshift-pipeline/pipelines-as-code:main"
-                    env:
-                      - name: PAC_APPLICATION_NAME
-                        valueFrom:
-                          configMapKeyRef:
-                            name: pipelines-as-code
-                            key: application-name
-                      - name: PAC_SECRET_AUTO_CREATE
-                        valueFrom:
-                          configMapKeyRef:
-                            name: pipelines-as-code
-                            key: secret-auto-create
-                      - name: PAC_WEBVCS_URL
-                        value: $(params.ghe_host)
-                      - name: PAC_WEBVCS_TOKEN
-                        value: $(params.token)
-                      - name: PAC_WEBVCS_TYPE
-                        value: "github"
-                    script: |
-                      cat << EOF > /tmp/payload.json
-                      {
-                        "repository": {
-                          "owner": {
-                            "login": "$(params.owner)"
-                          },
-                          "name": "$(params.repository)",
-                          "default_branch": "$(params.default_branch)",
-                          "html_url": "$(params.url)"
-                        },
-                        "sender": {
-                          "login": "$(params.sender)"
-                        },
-                        "ref": "$(params.base_ref)",
-                        "head_commit": {
-                          "id": "$(params.sha)"
-                        }
-                      }
-                      EOF
-                      env|grep '^PAC'|sed 's/TOKEN=.*/TOKEN=HIDDENTOKEN/'
-                      cat /tmp/payload.json
-                      pipelines-as-code --trigger-target=$(params.trigger_target) --webhook-type="$(params.event_type)" \
-                      --payload-file=/tmp/payload.json
-              params:
-                - name: ghe_host
-                  value: $(params.ghe_host)
-                - name: event_type
-                  value: $(params.event_type)
-                - name: trigger_target
-                  value: $(params.trigger_target)
-                - name: owner
-                  value: $(params.owner)
-                - name: repository
-                  value: $(params.repository)
-                - name: default_branch
-                  value: $(params.default_branch)
-                - name: url
-                  value: $(params.url)
-                - name: sender
-                  value: $(params.sender)
-                - name: base_ref
-                  value: $(params.base_ref)
-                - name: sha
-                  value: $(params.sha)
-                - name: head_ref
-                  value: $(params.head_ref)
-                - name: token
-                  value: "$(tasks.get-token.results.token)"
-
-        workspaces:
-          - name: secrets
-            secret:
-              secretName: github-app-secret
----
-# Copyright 2021 Red Hat
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
-apiVersion: triggers.tekton.dev/v1alpha1
-kind: TriggerBinding
-metadata:
-  name: pipelines-as-code-bindings-retest-comment
-  namespace: pipelines-as-code
-  labels:
-    app.kubernetes.io/instance: default
-    app.kubernetes.io/part-of: pipelines-as-code
-spec:
-  params:
-    - name: trigger_target
-      value: "retest-comment"
-    - name: action
-      value: $(body.action)
-    - name: event_type
-      value: $(header.X-GitHub-Event)
-    - name: "ghe_host"
-      value: $(header.X-GitHub-Enterprise-Host)
-    - name: owner
-      value: $(body.repository.owner.login)
-    - name: sender
-      value: $(body.sender.login)
-    - name: repository
-      value: $(body.repository.name)
-    - name: pull_request_url
-      value: $(body.issue.pull_request.html_url)
-    - name: installation_id
-      value: $(body.installation.id)
----
-apiVersion: triggers.tekton.dev/v1alpha1
-kind: TriggerTemplate
-metadata:
-  name: pipelines-as-code-template-retest-comment
-  namespace: pipelines-as-code
-  labels:
-    app.kubernetes.io/instance: default
-    app.kubernetes.io/part-of: pipelines-as-code
-spec:
-  params:
-    - name: action
-    - name: event_type
-    - name: owner
-    - name: sender
-    - name: repository
-    - name: pull_request_url
-    - name: installation_id
-      default: ""
-    - name: trigger_target
-    - name: ghe_host
-      default: "api.github.com"
-  resourcetemplates:
-    - apiVersion: tekton.dev/v1beta1
-      kind: PipelineRun
-      metadata:
-        generateName: pipelines-as-code-run-
-        labels:
-          app.kubernetes.io/managed-by: pipelines-as-code
-          pipelinesascode.tekton.dev/event: $(tt.params.event_type)
-      spec:
-        serviceAccountName: pipelines-as-code-sa-el
-        params:
-          - name: action
-            value: $(tt.params.action)
-          - name: event_type
-            value: $(tt.params.event_type)
-          - name: ghe_host
-            value: $(tt.params.ghe_host)
-          - name: owner
-            value: $(tt.params.owner)
-          - name: sender
-            value: $(tt.params.sender)
-          - name: repository
-            value: $(tt.params.repository)
-          - name: pull_request_url
-            value: $(tt.params.pull_request_url)
-          - name: installation_id
-            value: $(tt.params.installation_id)
-          - name: trigger_target
-            value: $(tt.params.trigger_target)
-        pipelineSpec:
-          params:
-            - name: action
-            - name: trigger_target
-            - name: ghe_host
-            - name: event_type
-            - name: owner
-            - name: sender
-            - name: repository
-            - name: pull_request_url
-            - name: installation_id
-          workspaces:
-            - name: secrets
-          tasks:
-            - name: get-token
-              taskRef:
-                name: github-app-token
-              params:
-                - name: github_api_url
-                  value: $(params.ghe_host)
-                - name: installation_id
-                  value: $(params.installation_id)
-              workspaces:
-                - name: secrets
-                  workspace: secrets
-            - name: pipelines-as-code
-              runAfter: [get-token]
-              taskSpec:
-                params:
-                  - name: action
-                    type: string
-                  - name: ghe_host
-                    type: string
-                  - name: event_type
-                    type: string
-                  - name: owner
-                    type: string
-                  - name: sender
-                    type: string
-                  - name: repository
-                    type: string
-                  - name: pull_request_url
-                    type: string
-                  - name: token
-                    type: string
-                  - name: trigger_target
-                    type: string
-                steps:
-                  - name: apply-and-launch
-                    imagePullPolicy: Always
-                    image: "quay.io/openshift-pipeline/pipelines-as-code:main"
-                    env:
-                      - name: PAC_APPLICATION_NAME
-                        valueFrom:
-                          configMapKeyRef:
-                            name: pipelines-as-code
-                            key: application-name
-                      - name: PAC_SECRET_AUTO_CREATE
-                        valueFrom:
-                          configMapKeyRef:
-                            name: pipelines-as-code
-                            key: secret-auto-create
-                      - name: PAC_WEBVCS_URL
-                        value: $(params.ghe_host)
-                      - name: PAC_WEBVCS_TOKEN
-                        value: $(params.token)
-                      - name: PAC_WEBVCS_TYPE
-                        value: "github"
-                    script: |
-                      cat << EOF|tee /tmp/payload.json
-                      {
-                        "action": "$(params.action)",
-                        "issue": {
-                          "pull_request": {
-                            "html_url": "$(params.pull_request_url)"
-                          }
-                        },
-                        "sender": {
-                           "login": "$(params.sender)"
-                         },
-                        "repository": {
-                            "name": "$(params.repository)",
-                            "owner": {
-                              "login": "$(params.owner)"
-                            }
-                        }
-                      }
-                      EOF
-                      env|grep '^PAC'|sed 's/TOKEN=.*/TOKEN=HIDDENTOKEN/'
-                      cat /tmp/payload.json
-                      pipelines-as-code --trigger-target=$(params.trigger_target) --webhook-type="$(params.event_type)" \
-                      --payload-file=/tmp/payload.json
-              params:
-                - name: action
-                  value: "$(params.action)"
-                - name: ghe_host
-                  value: "$(params.ghe_host)"
-                - name: trigger_target
-                  value: "$(params.trigger_target)"
-                - name: event_type
-                  value: "$(params.event_type)"
-                - name: owner
-                  value: "$(params.owner)"
-                - name: sender
-                  value: "$(params.sender)"
-                - name: repository
-                  value: "$(params.repository)"
-                - name: pull_request_url
-                  value: "$(params.pull_request_url)"
-                - name: token
-                  value: "$(tasks.get-token.results.token)"
-        workspaces:
-          - name: secrets
-            secret:
-              secretName: github-app-secret
----
-# Copyright 2021 Red Hat
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
-apiVersion: triggers.tekton.dev/v1alpha1
-kind: TriggerBinding
-metadata:
-  name: pipelines-as-code-bindings-ok-to-test-comment
-  namespace: pipelines-as-code
-  labels:
-    app.kubernetes.io/instance: default
-    app.kubernetes.io/part-of: pipelines-as-code
-spec:
-  params:
-    - name: action
-      value: "$(body.action)"
-    - name: trigger_target
-      value: "ok-to-test-comment"
-    - name: event_type
-      value: $(header.X-GitHub-Event)
-    - name: "ghe_host"
-      value: $(header.X-GitHub-Enterprise-Host)
-    - name: owner
-      value: $(body.repository.owner.login)
-    - name: sender
-      value: $(body.sender.login)
-    - name: repository
-      value: $(body.repository.name)
-    - name: pull_request_url
-      value: $(body.issue.pull_request.html_url)
-    - name: installation_id
-      value: $(body.installation.id)
----
-# Copyright 2021 Red Hat
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
-# NOTE: Syncronized with upstream as 0.2 and https://github.com/tektoncd/catalog/pull/729/
-
-apiVersion: tekton.dev/v1beta1
-kind: Task
-metadata:
-  name: github-app-token
-  namespace: pipelines-as-code
-  labels:
-    app.kubernetes.io/instance: default
-    app.kubernetes.io/part-of: pipelines-as-code
-    app.kubernetes.io/version: "0.2"
-  annotations:
-    tekton.dev/pipelines.minVersion: "0.12.1"
-    tekton.dev/tags: github
-    tekton.dev/displayName: "github app token"
-spec:
-  description: >-
-    Retrieve a user token from a GitHub application
-
-    This task will get a user token for an installation_id for a GitHub application.
-    This could be then reuse to do user operations.
-
-  workspaces:
-    - name: secrets
-
-  results:
-    - name: token
-      description: The user token to use.
-
-  params:
-    - name: installation_id
-      description: The installation id for the GitHub application to request a token for.
-      type: string
-
-    - name: application_id
-      description: The application id for the GitHub application to request a token for.
-      type: string
-      default: "api.github.com"
-
-    - name: private_key_path
-      description: The key path inside the secret workspace
-      type: string
-      default: "private.key"
-
-    - name: application_id_path
-      description: The path for the application id inside the secret workspace
-      type: string
-      default: "application_id"
-
-    - name: token_expiration_minutes
-      description: Token expiration time in minutes
-      type: string
-      default: "10"
-
-    - name: github_api_url
-      description: GitHUB API URL endpoint
-      type: string
-      default: "api.github.com"
-
-  steps:
-    - name: get-token
-      image: quay.io/chmouel/github-app-token@sha256:bc45937ae588df876555ebb56c36350ed74592c7f55f2df255cabef39c926a88
-      env:
-        - name: GITHUBAPP_KEY_PATH
-          value: $(workspaces.secrets.path)/$(params.private_key_path)
-        - name: GITHUBAPP_APP_ID_PATH
-          value: $(workspaces.secrets.path)/$(params.application_id_path)
-        - name: GITHUBAPP_APP_ID
-          value: $(params.application_id)
-        - name: GITHUBAPP_INSTALLATION_ID
-          value: $(params.installation_id)
-        - name: GITHUBAPP_TOKEN_EXPIRATION_MINUTES
-          value: $(params.token_expiration_minutes)
-        - name: GITHUBAPP_RESULT_PATH
-          value: $(results.token.path)
-        - name: GITHUB_API_URL
-          value: $(params.github_api_url)
-      script: |
-        #!/usr/bin/env python3
-        import json
-        import os
-        import time
-        import sys
-
-        import requests
-        from jwcrypto import jwk, jwt
-
-        if not os.environ.get("GITHUBAPP_INSTALLATION_ID"):
-          open(os.environ.get('GITHUBAPP_RESULT_PATH'), 'w').write("")
-          print("Skipping, since event not coming from a githup app installation")
-          sys.exit(0)
-
-        EXPIRE_MINUTES_AS_SECONDS = int(os.environ.get('GITHUBAPP_TOKEN_EXPIRATION_MINUTES', 10)) * 60
-        GITHUB_API_URL = "https://" + os.environ.get('GITHUB_API_URL')
-        if GITHUB_API_URL != "https://api.github.com":
-          GITHUB_API_URL += "/api/v3"
-
-        class GitHub():
-            token = None
-
-            def __init__(self, private_key, app_id=None, installation_id=None):
-                if not isinstance(private_key, bytes):
-                    raise ValueError(f'"{private_key}" parameter must be byte-string')
-                self._private_key = private_key
-                self.app_id = app_id
-                self.token = self._get_token(installation_id)
-
-            def _load_private_key(self, pem_key_bytes):
-                return jwk.JWK.from_pem(pem_key_bytes)
-
-            def _app_token(self, expire_in=EXPIRE_MINUTES_AS_SECONDS):
-                key = self._load_private_key(self._private_key)
-                now = int(time.time())
-                token = jwt.JWT(
-                    header={"alg": "RS256"},
-                    claims={
-                        "iat": now,
-                        "exp": now + expire_in,
-                        "iss": self.app_id
-                    },
-                    algs=["RS256"],
-                )
-                token.make_signed_token(key)
-                return token.serialize()
-
-            def _get_token(self, installation_id=None):
-                app_token = self._app_token()
-                if not installation_id:
-                    return app_token
-
-                req = self._request(
-                    "POST",
-                    f"/app/installations/{installation_id}/access_tokens",
-                    headers={
-                        "Authorization": f"Bearer {app_token}",
-                        "Accept": "application/vnd.github.machine-man-preview+json"
-                    })
-                if not req.text.strip():
-                    raise Exception("Not getting a json: code: %s reason: %s" %
-                    (req.status_code, req.reason))
-                ret = req.json()
-                if 'token' not in ret:
-                    raise Exception(f"Authentication errors: {req.text}")
-
-                return ret['token']
-
-            def _request(self, method, url, headers={}, data={}):
-                if self.token and 'Authorization' not in headers:
-                    headers.update({"Authorization": "Bearer " + self.token})
-                if not url.startswith("http"):
-                    url = f"{GITHUB_API_URL}{url}"
-                return requests.request(method,
-                                        url,
-                                        headers=headers,
-                                        data=json.dumps(data))
-
-        def main():
-            with open(os.environ['GITHUBAPP_KEY_PATH'], 'rb') as key_file:
-                key = key_file.read()
-
-            if os.path.exists(os.environ['GITHUBAPP_APP_ID_PATH']):
-                app_id = open(os.environ['GITHUBAPP_APP_ID_PATH']).read()
-            elif os.environ.get('GITHUBAPP_APP_ID'):
-                app_id = os.environ['GITHUBAPP_APP_ID']
-            else:
-                raise Exception("application id is not set")
-
-            print(f"Getting user token for application_id: {app_id}")
-            github_app = GitHub(
-                key,
-                app_id=app_id,
-                installation_id=os.environ.get('GITHUBAPP_INSTALLATION_ID'))
-            open(os.environ.get('GITHUBAPP_RESULT_PATH'), 'w').write(github_app.token)
-
-        if __name__ == '__main__':
-            main()
 ---
 apiVersion: route.openshift.io/v1
 kind: Route
