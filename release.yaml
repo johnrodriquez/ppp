@@ -391,7 +391,7 @@ spec:
           params:
             - name: "secretRef"
               value:
-                secretName: "github-app-secret"
+                secretName: "pipelines-as-code-secret"
                 secretKey: "webhook.secret"
             - name: "eventTypes"
               value: ["issue_comment"]
@@ -419,7 +419,7 @@ spec:
           params:
             - name: "secretRef"
               value:
-                secretName: "github-app-secret"
+                secretName: "pipelines-as-code-secret"
                 secretKey: "webhook.secret"
             - name: "eventTypes"
               value: ["issue_comment"]
@@ -448,7 +448,7 @@ spec:
           params:
             - name: "secretRef"
               value:
-                secretName: "github-app-secret"
+                secretName: "pipelines-as-code-secret"
                 secretKey: "webhook.secret"
             - name: "eventTypes"
               value: ["push"]
@@ -472,7 +472,7 @@ spec:
           params:
             - name: "secretRef"
               value:
-                secretName: "github-app-secret"
+                secretName: "pipelines-as-code-secret"
                 secretKey: "webhook.secret"
             - name: "eventTypes"
               value: ["check_run"]
@@ -497,7 +497,7 @@ spec:
           params:
             - name: "secretRef"
               value:
-                secretName: "github-app-secret"
+                secretName: "pipelines-as-code-secret"
                 secretKey: "webhook.secret"
             - name: "eventTypes"
               value: ["pull_request"]
@@ -847,7 +847,7 @@ spec:
         workspaces:
           - name: secrets
             secret:
-              secretName: github-app-secret
+              secretName: pipelines-as-code-secret
 ---
 # Copyright 2021 Red Hat
 #
@@ -1115,7 +1115,7 @@ spec:
         workspaces:
           - name: secrets
             secret:
-              secretName: github-app-secret
+              secretName: pipelines-as-code-secret
 ---
 # Copyright 2021 Red Hat
 #
@@ -1358,7 +1358,7 @@ spec:
         workspaces:
           - name: secrets
             secret:
-              secretName: github-app-secret
+              secretName: pipelines-as-code-secret
 ---
 # Copyright 2021 Red Hat
 #
@@ -1569,7 +1569,7 @@ spec:
         workspaces:
           - name: secrets
             secret:
-              secretName: github-app-secret
+              secretName: pipelines-as-code-secret
 ---
 # Copyright 2021 Red Hat
 #
