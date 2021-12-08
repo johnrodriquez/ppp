@@ -17,6 +17,7 @@ kind: Namespace
 metadata:
   name: pipelines-as-code
   labels:
+    app.kubernetes.io/version: "devel"
     app.kubernetes.io/instance: default
     app.kubernetes.io/part-of: pipelines-as-code
 ---
@@ -43,6 +44,7 @@ metadata:
   name: pipelines-as-code-sa-el
   namespace: pipelines-as-code
   labels:
+    app.kubernetes.io/version: "devel"
     app.kubernetes.io/instance: default
     app.kubernetes.io/part-of: pipelines-as-code
 ---
@@ -52,6 +54,7 @@ metadata:
   name: pipelines-as-code-role-el
   namespace: pipelines-as-code
   labels:
+    app.kubernetes.io/version: "devel"
     app.kubernetes.io/instance: default
     app.kubernetes.io/part-of: pipelines-as-code
 rules:
@@ -80,6 +83,7 @@ metadata:
   name: pipelines-as-code-binding
   namespace: pipelines-as-code
   labels:
+    app.kubernetes.io/version: "devel"
     app.kubernetes.io/instance: default
     app.kubernetes.io/part-of: pipelines-as-code
 subjects:
@@ -97,6 +101,7 @@ metadata:
   name: openshift-pipeline-as-code-clusterrole
   namespace: pipelines-as-code
   labels:
+    app.kubernetes.io/version: "devel"
     app.kubernetes.io/instance: default
     app.kubernetes.io/part-of: pipelines-as-code
 rules:
@@ -132,6 +137,7 @@ metadata:
   name: pipelines-as-code-clusterbinding
   namespace: pipelines-as-code
   labels:
+    app.kubernetes.io/version: "devel"
     app.kubernetes.io/instance: default
     app.kubernetes.io/part-of: pipelines-as-code
 subjects:
@@ -162,6 +168,7 @@ kind: CustomResourceDefinition
 metadata:
   name: repositories.pipelinesascode.tekton.dev
   labels:
+    app.kubernetes.io/version: "devel"
     app.kubernetes.io/instance: default
     app.kubernetes.io/part-of: pipelines-as-code
 spec:
@@ -289,6 +296,7 @@ metadata:
   name: pipelines-as-code
   namespace: pipelines-as-code
   labels:
+    app.kubernetes.io/version: "devel"
     app.kubernetes.io/part-of: pipelines-as-code
 ---
 # Copyright 2021 Red Hat
@@ -311,6 +319,7 @@ metadata:
   name: pipelines-as-code-pr-cleanup
   namespace: pipelines-as-code
   labels:
+    app.kubernetes.io/version: "devel"
     app.kubernetes.io/part-of: pipelines-as-code
 spec:
   concurrencyPolicy: Replace
@@ -375,6 +384,7 @@ metadata:
   namespace: pipelines-as-code
   labels:
     app.kubernetes.io/instance: default
+    app.kubernetes.io/version: "devel"
     app.kubernetes.io/part-of: pipelines-as-code
 spec:
   serviceAccountName: pipelines-as-code-sa-el
@@ -703,6 +713,7 @@ metadata:
   name: pipelines-as-code-github-recheck
   namespace: pipelines-as-code
   labels:
+    app.kubernetes.io/version: "devel"
     app.kubernetes.io/instance: default
     app.kubernetes.io/part-of: pipelines-as-code
 spec:
@@ -741,6 +752,7 @@ metadata:
   name: pipelines-as-code-github-recheck
   namespace: pipelines-as-code
   labels:
+    app.kubernetes.io/version: "devel"
     app.kubernetes.io/instance: default
     app.kubernetes.io/part-of: pipelines-as-code
 spec:
@@ -766,6 +778,7 @@ spec:
       metadata:
         generateName: pipelines-as-code-run-
         labels:
+          app.kubernetes.io/version: "devel"
           app.kubernetes.io/managed-by: pipelines-as-code
           pipelinesascode.tekton.dev/event: $(tt.params.event_type)
       spec:
@@ -952,6 +965,7 @@ metadata:
   name: pipelines-as-code-github-pullreq
   namespace: pipelines-as-code
   labels:
+    app.kubernetes.io/version: "devel"
     app.kubernetes.io/instance: default
     app.kubernetes.io/part-of: pipelines-as-code
 spec:
@@ -991,6 +1005,7 @@ metadata:
   name: pipelines-as-code-github-pullreq
   namespace: pipelines-as-code
   labels:
+    app.kubernetes.io/version: "devel"
     app.kubernetes.io/instance: default
     app.kubernetes.io/part-of: pipelines-as-code
 spec:
@@ -1017,6 +1032,7 @@ spec:
       metadata:
         generateName: pipelines-as-code-run-
         labels:
+          app.kubernetes.io/version: "devel"
           app.kubernetes.io/managed-by: pipelines-as-code
           pipelinesascode.tekton.dev/event: $(tt.params.event_type)
       spec:
@@ -1210,6 +1226,7 @@ metadata:
   name: pipelines-as-code-github-push
   namespace: pipelines-as-code
   labels:
+    app.kubernetes.io/version: "devel"
     app.kubernetes.io/instance: default
     app.kubernetes.io/part-of: pipelines-as-code
 spec:
@@ -1246,6 +1263,7 @@ metadata:
   name: pipelines-as-code-github-push
   namespace: pipelines-as-code
   labels:
+    app.kubernetes.io/version: "devel"
     app.kubernetes.io/instance: default
     app.kubernetes.io/part-of: pipelines-as-code
 spec:
@@ -1270,6 +1288,7 @@ spec:
       metadata:
         generateName: pipelines-as-code-run-
         labels:
+          app.kubernetes.io/version: "devel"
           app.kubernetes.io/managed-by: pipelines-as-code
           pipelinesascode.tekton.dev/event: $(tt.params.event_type)
       spec:
@@ -1443,6 +1462,7 @@ metadata:
   name: pipelines-as-code-github-retest-comment
   namespace: pipelines-as-code
   labels:
+    app.kubernetes.io/version: "devel"
     app.kubernetes.io/instance: default
     app.kubernetes.io/part-of: pipelines-as-code
 spec:
@@ -1472,6 +1492,7 @@ metadata:
   name: pipelines-as-code-github-retest-comment
   namespace: pipelines-as-code
   labels:
+    app.kubernetes.io/version: "devel"
     app.kubernetes.io/instance: default
     app.kubernetes.io/part-of: pipelines-as-code
 spec:
@@ -1493,6 +1514,7 @@ spec:
       metadata:
         generateName: pipelines-as-code-run-
         labels:
+          app.kubernetes.io/version: "devel"
           app.kubernetes.io/managed-by: pipelines-as-code
           pipelinesascode.tekton.dev/event: $(tt.params.event_type)
       spec:
@@ -1644,6 +1666,7 @@ metadata:
   name: pipelines-as-code-github-ok-to-test-comment
   namespace: pipelines-as-code
   labels:
+    app.kubernetes.io/version: "devel"
     app.kubernetes.io/instance: default
     app.kubernetes.io/part-of: pipelines-as-code
 spec:
@@ -1687,6 +1710,7 @@ metadata:
   name: pipelines-as-code-bitbucket-cloud-pullreq
   namespace: pipelines-as-code
   labels:
+    app.kubernetes.io/version: "devel"
     app.kubernetes.io/instance: default
     app.kubernetes.io/part-of: pipelines-as-code
 spec:
@@ -1704,6 +1728,7 @@ metadata:
   name: pipelines-as-code-bitbucket-cloud-pullreq-common
   namespace: pipelines-as-code
   labels:
+    app.kubernetes.io/version: "devel"
     app.kubernetes.io/instance: default
     app.kubernetes.io/part-of: pipelines-as-code
 spec:
@@ -1735,6 +1760,7 @@ metadata:
   name: pipelines-as-code-bitbucket-cloud-pullreq
   namespace: pipelines-as-code
   labels:
+    app.kubernetes.io/version: "devel"
     app.kubernetes.io/instance: default
     app.kubernetes.io/part-of: pipelines-as-code
 spec:
@@ -1757,6 +1783,7 @@ spec:
       metadata:
         generateName: pipelines-as-code-run-
         labels:
+          app.kubernetes.io/version: "devel"
           app.kubernetes.io/managed-by: pipelines-as-code
           # TODO: maybe do a truncate here to at least know the pull_request event
           # pipelinesascode.tekton.dev/event: $(tt.params.event_type)
@@ -1941,6 +1968,7 @@ metadata:
   name: pipelines-as-code-bitbucket-cloud-push
   namespace: pipelines-as-code
   labels:
+    app.kubernetes.io/version: "devel"
     app.kubernetes.io/instance: default
     app.kubernetes.io/part-of: pipelines-as-code
 spec:
@@ -1974,6 +2002,7 @@ metadata:
   name: pipelines-as-code-bitbucket-cloud-push
   namespace: pipelines-as-code
   labels:
+    app.kubernetes.io/version: "devel"
     app.kubernetes.io/instance: default
     app.kubernetes.io/part-of: pipelines-as-code
 spec:
@@ -1996,6 +2025,7 @@ spec:
       metadata:
         generateName: pipelines-as-code-run-
         labels:
+          app.kubernetes.io/version: "devel"
           app.kubernetes.io/managed-by: pipelines-as-code
       spec:
         serviceAccountName: pipelines-as-code-sa-el
@@ -2168,6 +2198,7 @@ metadata:
   name: pipelines-as-code-bitbucket-cloud-retest-comment
   namespace: pipelines-as-code
   labels:
+    app.kubernetes.io/version: "devel"
     app.kubernetes.io/instance: default
     app.kubernetes.io/part-of: pipelines-as-code
 spec:
@@ -2184,6 +2215,7 @@ metadata:
   name: pipelines-as-code-bitbucket-cloud-ok-to-test-comment
   namespace: pipelines-as-code
   labels:
+    app.kubernetes.io/version: "devel"
     app.kubernetes.io/instance: default
     app.kubernetes.io/part-of: pipelines-as-code
 spec:
@@ -2213,6 +2245,7 @@ metadata:
   name: pipelines-as-code-bitbucket-server-pullreq
   namespace: pipelines-as-code
   labels:
+    app.kubernetes.io/version: "devel"
     app.kubernetes.io/instance: default
     app.kubernetes.io/part-of: pipelines-as-code
 spec:
@@ -2230,6 +2263,7 @@ metadata:
   name: pipelines-as-code-bitbucket-server-pullreq-common
   namespace: pipelines-as-code
   labels:
+    app.kubernetes.io/version: "devel"
     app.kubernetes.io/instance: default
     app.kubernetes.io/part-of: pipelines-as-code
 spec:
@@ -2284,6 +2318,7 @@ metadata:
   name: pipelines-as-code-bitbucket-server-pullreq
   namespace: pipelines-as-code
   labels:
+    app.kubernetes.io/version: "devel"
     app.kubernetes.io/instance: default
     app.kubernetes.io/part-of: pipelines-as-code
 spec:
@@ -2311,6 +2346,7 @@ spec:
       metadata:
         generateName: pipelines-as-code-run-
         labels:
+          app.kubernetes.io/version: "devel"
           app.kubernetes.io/managed-by: pipelines-as-code
       spec:
         serviceAccountName: pipelines-as-code-sa-el
@@ -2528,6 +2564,7 @@ metadata:
   name: pipelines-as-code-bitbucket-server-push
   namespace: pipelines-as-code
   labels:
+    app.kubernetes.io/version: "devel"
     app.kubernetes.io/instance: default
     app.kubernetes.io/part-of: pipelines-as-code
 spec:
@@ -2564,6 +2601,7 @@ metadata:
   name: pipelines-as-code-bitbucket-server-push
   namespace: pipelines-as-code
   labels:
+    app.kubernetes.io/version: "devel"
     app.kubernetes.io/instance: default
     app.kubernetes.io/part-of: pipelines-as-code
 spec:
@@ -2586,6 +2624,7 @@ spec:
       metadata:
         generateName: pipelines-as-code-run-
         labels:
+          app.kubernetes.io/version: "devel"
           app.kubernetes.io/managed-by: pipelines-as-code
       spec:
         serviceAccountName: pipelines-as-code-sa-el
@@ -2731,6 +2770,7 @@ metadata:
   name: pipelines-as-code-bitbucket-server-retest-comment
   namespace: pipelines-as-code
   labels:
+    app.kubernetes.io/version: "devel"
     app.kubernetes.io/instance: default
     app.kubernetes.io/part-of: pipelines-as-code
 spec:
@@ -2747,6 +2787,7 @@ metadata:
   name: pipelines-as-code-bitbucket-server-ok-to-test-comment
   namespace: pipelines-as-code
   labels:
+    app.kubernetes.io/version: "devel"
     app.kubernetes.io/instance: default
     app.kubernetes.io/part-of: pipelines-as-code
 spec:
